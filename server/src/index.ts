@@ -9,9 +9,9 @@ import { registerSockets } from './sockets';
 
 dotenv.config(); // load .env values into process.env
 
-const PORT = Number(process.env.PORT || 4000); // default port for local dev
-const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173'; // allow local frontend
-
+const PORT = Number(process.env.PORT || 4000);
+const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
+console.log(CORS_ORIGIN);
 const app = express();
 app.use(cors({ origin: CORS_ORIGIN })); // use env-defined frontend origin
 app.use(express.json());
