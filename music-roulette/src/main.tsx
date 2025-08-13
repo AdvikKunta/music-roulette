@@ -4,10 +4,12 @@ import './index.css';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import Home from './pages/Home';
 import Lobby from './pages/Lobby';
+import Submissions from './pages/Submissions';
 
 const router = createBrowserRouter([
   { path: '/', element: <Home /> },
   { path: '/lobby/:code', element: <Lobby /> },
+  { path: '/submit/:code', element: <Submissions /> },
 ]);
 
 createRoot(document.getElementById('root')!).render(

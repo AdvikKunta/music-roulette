@@ -4,7 +4,14 @@ import { api } from '../lib/api';
 import { getSocket } from '../lib/socket';
 
 type Player = { id: string; name: string; isHost: boolean };
-type Room = { code: string; players: Player[] };
+type Room = {
+  code: string;
+  phase: 'lobby' | 'submitting' | 'playing' | 'ended';
+  players: Player[];
+  numSongsPerPlayer?: number;
+  timePerVotingRoundSeconds?: number;
+  numSongsToPlay?: number;
+};
 
 export default function Lobby() {
   const { code = '' } = useParams();
@@ -28,9 +35,23 @@ export default function Lobby() {
           navigate('/');
           return;
         }
+        if (!stillInRoom && leavingRef.current) {
+          // user intentionally left; go home silently
+          localStorage.removeItem('mr_me');
+          navigate('/');
+          return;
+        }
+        // If already in game phases, redirect to appropriate page
+        if (snap.phase === 'submitting') {
+          navigate(`/submit/${code}`);
+          return;
+        }
         setSnapshot(snap);
       } catch {
-        setSnapshot(null);
+        try { sessionStorage.setItem('mr_flash', 'Room not found or expired.'); } catch {}
+        localStorage.removeItem('mr_me');
+        navigate('/');
+        return;
       }
     }
     load();
@@ -47,8 +68,28 @@ export default function Lobby() {
         navigate('/');
         return;
       }
+      if (!stillInRoom && leavingRef.current) {
+        // user intentionally left; no kick message
+        localStorage.removeItem('mr_me');
+        navigate('/');
+        return;
+      }
+      if (snap.phase === 'submitting') {
+        navigate(`/submit/${code}`);
+        return;
+      }
       setSnapshot(snap);
     });
+    const onDisconnect = async () => {
+      try {
+        await api.get(`/rooms/${code}`);
+      } catch {
+        try { sessionStorage.setItem('mr_flash', 'Room not found or expired.'); } catch {}
+        localStorage.removeItem('mr_me');
+        navigate('/');
+      }
+    };
+    socket.on('disconnect', onDisconnect);
     socket.on('room:deleted', (payload) => {
       if (payload?.code !== code) return;
       if (leavingRef.current) return; // suppress notice for the host or anyone intentionally leaving
@@ -61,6 +102,7 @@ export default function Lobby() {
     return () => {
       socket.off('room:state');
       socket.off('room:deleted');
+      socket.off('disconnect', onDisconnect);
     };
   }, [code, me?.playerId, navigate]);
 
@@ -76,7 +118,7 @@ export default function Lobby() {
   }
 
   const isHost = !!snapshot.players.find((p) => p.id === me?.playerId && p.isHost);
-  const canStart = snapshot.players.length >= 3;
+  const canStart = snapshot.players.length >= 3 && snapshot?.phase === 'lobby';
 
   function leave() {
     if (!me) return navigate('/');
@@ -105,7 +147,17 @@ export default function Lobby() {
 
   function startGame() {
     if (!isHost || !canStart) return;
-    alert('Start clicked (stub).');
+    (async () => {
+      try {
+        const songs = Number((document.getElementById('cfg-songs') as HTMLInputElement).value);
+        const time = Number((document.getElementById('cfg-time') as HTMLInputElement).value);
+        const total = Number((document.getElementById('cfg-total') as HTMLInputElement).value);
+        await api.post(`/rooms/${code}/config`, { playerId: me.playerId, numSongsPerPlayer: songs, timePerVotingRoundSeconds: time, numSongsToPlay: total });
+        await api.post(`/rooms/${code}/start`, { playerId: me.playerId });
+      } catch (e: any) {
+        console.error('Start failed', e?.response?.data || e);
+      }
+    })();
   }
 
   return (
@@ -118,9 +170,51 @@ export default function Lobby() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div style={{ color: '#94a3b8' }}>
             You: <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{me?.name || 'Unknown'}</span>
+            <span style={{ marginLeft: 8, color: '#94a3b8' }}>
+              {snapshot.players.some((p) => p.id === me?.playerId && p.isHost) ? '(Host)' : '(Player)'}
+            </span>
           </div>
         </div>
         <div style={{ marginBottom: 16, color: '#94a3b8' }}>Waiting for players. Host can start at 3+ players.</div>
+        {isHost && (
+          <div style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <label style={{ color: '#94a3b8', minWidth: 180 }}>Songs per player</label>
+              <input type="number" min={1} max={10} defaultValue={snapshot?.numSongsPerPlayer || 3} id="cfg-songs" style={{ width: 120, background: '#0f172a', border: '1px solid #334155', color: '#e2e8f0', borderRadius: 8, padding: '8px 10px' }} onChange={async () => {
+                const songs = Number((document.getElementById('cfg-songs') as HTMLInputElement).value);
+                const time = Number((document.getElementById('cfg-time') as HTMLInputElement).value);
+                const total = Number((document.getElementById('cfg-total') as HTMLInputElement).value);
+                await api.post(`/rooms/${code}/config`, { playerId: me.playerId, numSongsPerPlayer: songs, timePerVotingRoundSeconds: time, numSongsToPlay: total }).catch(() => {});
+              }} />
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <label style={{ color: '#94a3b8', minWidth: 180 }}>Time per voting round (seconds, 0=manual)</label>
+              <input type="number" min={0} max={300} defaultValue={snapshot?.timePerVotingRoundSeconds ?? 30} id="cfg-time" style={{ width: 120, background: '#0f172a', border: '1px solid #334155', color: '#e2e8f0', borderRadius: 8, padding: '8px 10px' }} onChange={async () => {
+                const songs = Number((document.getElementById('cfg-songs') as HTMLInputElement).value);
+                const time = Number((document.getElementById('cfg-time') as HTMLInputElement).value);
+                const total = Number((document.getElementById('cfg-total') as HTMLInputElement).value);
+                await api.post(`/rooms/${code}/config`, { playerId: me.playerId, numSongsPerPlayer: songs, timePerVotingRoundSeconds: time, numSongsToPlay: total }).catch(() => {});
+              }} />
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <label style={{ color: '#94a3b8', minWidth: 180 }}>Number of songs to play</label>
+              <input type="number" min={1} max={100} defaultValue={snapshot?.numSongsToPlay ?? 10} id="cfg-total" style={{ width: 120, background: '#0f172a', border: '1px solid #334155', color: '#e2e8f0', borderRadius: 8, padding: '8px 10px' }} onChange={async () => {
+                const songs = Number((document.getElementById('cfg-songs') as HTMLInputElement).value);
+                const time = Number((document.getElementById('cfg-time') as HTMLInputElement).value);
+                const total = Number((document.getElementById('cfg-total') as HTMLInputElement).value);
+                await api.post(`/rooms/${code}/config`, { playerId: me.playerId, numSongsPerPlayer: songs, timePerVotingRoundSeconds: time, numSongsToPlay: total }).catch(() => {});
+              }} />
+            </div>
+          </div>
+        )}
+        {!isHost && (
+          <div style={{ display: 'grid', gap: 6, marginBottom: 16, color: '#94a3b8' }}>
+            <div>Settings chosen by host:</div>
+            <div>• Songs per player: <span style={{ color: '#e2e8f0' }}>{snapshot.numSongsPerPlayer ?? 3}</span></div>
+            <div>• Time per voting round: <span style={{ color: '#e2e8f0' }}>{snapshot.timePerVotingRoundSeconds ?? 30}</span> sec {snapshot.timePerVotingRoundSeconds === 0 ? '(manual)' : ''}</div>
+            <div>• Total songs to play: <span style={{ color: '#e2e8f0' }}>{snapshot.numSongsToPlay ?? 10}</span></div>
+          </div>
+        )}
         <ul style={{ display: 'grid', gap: 8, margin: 0, padding: 0, listStyle: 'none' }}>
           {snapshot.players.map((p) => (
             <li key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(2,6,23,0.6)', border: '1px solid #334155', borderRadius: 10, padding: '8px 12px' }}>
@@ -136,10 +230,12 @@ export default function Lobby() {
         </ul>
         {isHost ? (
           <button onClick={startGame} disabled={!canStart} style={{ width: '100%', background: canStart ? '#0891b2' : '#334155', color: 'white', border: 'none', borderRadius: 10, padding: '10px 12px', cursor: canStart ? 'pointer' : 'not-allowed', marginTop: 16 }}>
-            {canStart ? 'Start Game' : 'Need 3+ players to start'}
+            {snapshot?.phase !== 'lobby' ? 'Game in progress' : canStart ? 'Start Game' : 'Need 3+ players to start'}
           </button>
         ) : (
-          <div style={{ textAlign: 'center', color: '#94a3b8', marginTop: 16 }}>Waiting for host to start…</div>
+          snapshot?.phase === 'lobby' ? (
+            <div style={{ textAlign: 'center', color: '#94a3b8', marginTop: 16 }}>Waiting for host to start…</div>
+          ) : <div style={{ textAlign: 'center', color: '#94a3b8', marginTop: 16 }}>Starting game...</div>
         )}
       </div>
     </div>

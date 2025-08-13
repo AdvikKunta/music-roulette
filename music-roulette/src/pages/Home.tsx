@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 
 type Player = { id: string; name: string; isHost: boolean };
-type Room = { code: string; players: Player[] };
 
 export default function Home() {
   const navigate = useNavigate();

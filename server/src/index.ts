@@ -3,20 +3,25 @@ import http from 'http';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { Server } from 'socket.io';
-import { env } from './env';
+import dotenv from 'dotenv';
 import routes from './routes';
 import { registerSockets } from './sockets';
 
+dotenv.config(); // load .env values into process.env
+
+const PORT = Number(process.env.PORT || 4000); // default port for local dev
+const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173'; // allow local frontend
+
 const app = express();
-app.use(cors({ origin: env.CORS_ORIGIN }));
+app.use(cors({ origin: CORS_ORIGIN })); // use env-defined frontend origin
 app.use(express.json());
 app.use(rateLimit({ windowMs: 60_000, limit: 120 }));
 app.use('/api', routes);
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: env.CORS_ORIGIN } });
+const io = new Server(server, { cors: { origin: CORS_ORIGIN } }); // match CORS for sockets
 registerSockets(io);
 
-server.listen(env.PORT, () => console.log(`[server] listening on :${env.PORT}`));
+server.listen(PORT, () => console.log(`[server] listening on :${PORT}`));
 
 
